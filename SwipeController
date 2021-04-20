@@ -1,0 +1,215 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+public enum DragDir
+{
+    none,
+    left,
+    right,
+    up,
+    down
+}
+
+/// On Center, Large Horizontal Scrollview  
+/// In Large Horizontal Scrollview, there is a small scrollview
+/// According to user swipe direction, decide scrollview drag direction 
+/// (Example) Direction Up or Down => Only Scroll Up & Down 
+///           Direction Left or Right => Only Scroll Left & Right
+public class LobbySwipeController : MonoBehaviour
+{
+    // Check Now Panel Drag Power
+    [SerializeField] float LobbyScrollViewThresHold = 350f;
+    
+    [Header ("[----Swipe Check ScrollView List----]")]
+    [SerializeField] UIScrollView HorizontalScrollView;
+    [SerializeField] UIScrollView ShopScrollView;
+
+    [Header ("[----Each ScrollView Drag Collider----]")]
+    [SerializeField] GameObject[] shopDragObj;
+
+    //Drag Collider UIDragScrollView 
+    List<UIDragScrollView> ShopHorizontalScrollView = new List<UIDragScrollView>();
+    List<UIDragScrollView> ShopVerticalScrollView = new List<UIDragScrollView>();
+    
+    //First Click Position
+    Vector3 nowPressPos;
+    //Swipe Direction
+    DragDir nowDragDir;
+    float vec_Dir;
+    
+    //True이면 패널간 이동 Swipe 동작 안하도록
+    bool isExceptHorizontal = false;
+    [SerializeField] Camera swipeCheckCamera;
+
+    private void Start()
+    {
+        nowDragDir = DragDir.none;
+        InitScrollView();        
+    }
+
+    void InitScrollView()
+    {
+        List<UIDragScrollView[]> DragList = new List<UIDragScrollView[]>();
+        //UI DragScrollview Settings => Shop
+        for (int i= 0;i<shopDragObj.Length;i++)
+        {
+            DragList.Add(shopDragObj[i].GetComponents<UIDragScrollView>());
+        }
+        
+        for (int i = 0; i < DragList.Count; i++)
+        {
+            if (DragList[i][0].scrollView == HorizontalScrollView)
+                ShopHorizontalScrollView.Add(DragList[i][0]);
+            if (DragList[i][1].scrollView == ShopScrollView)
+                ShopVerticalScrollView.Add(DragList[i][1]);
+        }
+        DragList = null;
+    }
+       
+    //방향 처리 & Drag ScrollView Enable - true , false
+    private void Update()
+    {
+        if(UIManager.Instance.GetStackCount() == 0)
+            SwipeControl();
+    }
+
+    public void SwipeControl()
+    {
+        #region 기존 
+        // ================ 기존 =================//
+        //눌럿을때 => 딱 1번
+        if (Input.GetMouseButtonDown(0))
+        {
+            if (UIManager.Instance.nowPanelNum == 3)
+            {
+                var ray = swipeCheckCamera.ScreenPointToRay(Input.mousePosition);
+                RaycastHit hit;
+                Physics.Raycast(ray, out hit);
+                // Shirts_Grid 등 코스튬 스크롤뷰를 드래그 할때는 처리하지 않도록 한다
+                if (hit.collider.transform.parent.gameObject.name.Contains("Grid"))
+                    isExceptHorizontal = true;
+            }
+            var pos = /*UICamera.mainCamera*/swipeCheckCamera.ScreenToWorldPoint(Input.mousePosition);            
+            pos =/*UICamera.mainCamera*/swipeCheckCamera.WorldToScreenPoint(pos);
+            nowPressPos = pos;
+            vec_Dir = 0;
+        }
+        //누르고 있는동안 => 드래그?
+        if (Input.GetMouseButton(0))
+        {
+            //코스튬 스크롤뷰를 스크롤 하는거라면 그냥 지나감
+            if (isExceptHorizontal)
+            {
+                nowDragDir = DragDir.none;
+            }
+            else
+            {
+                var pos = /*UICamera.mainCamera*/swipeCheckCamera.ScreenToWorldPoint(Input.mousePosition);
+                pos = /*UICamera.mainCamera*/swipeCheckCamera.WorldToScreenPoint(pos);
+                Vector3 tempPos = pos;
+                float angle = Quaternion.FromToRotation(Vector3.up, tempPos - nowPressPos).eulerAngles.z;
+                vec_Dir = nowPressPos.x - tempPos.x;
+                //처음 누르고 가만히 있는거면 각도 없음
+                if (angle == 0)
+                {
+                    nowDragDir = DragDir.none;
+                    return;
+                }
+                if (nowDragDir == DragDir.none)
+                {
+                    //위
+                    if (angle <= 45 || angle > 315)
+                        nowDragDir = DragDir.up;
+                    //왼쪽
+                    else if (angle > 45 && angle <= 135)
+                        nowDragDir = DragDir.left;
+                    //아래
+                    else if (angle > 135 && angle <= 225)
+                        nowDragDir = DragDir.down;
+                    //오른쪽
+                    else if (angle > 225 && angle <= 315)
+                        nowDragDir = DragDir.right;
+
+                    //각도에 따른 처리 => 콜라이더 온오프
+                    CheckDragDirection();
+                }
+            }         
+        }
+        //뗐을때 => 딱 1번
+        if (Input.GetMouseButtonUp(0))
+        {
+            if (nowDragDir == DragDir.left)
+            {
+                if(Mathf.Abs(vec_Dir) >= LobbyScrollViewThresHold)
+                    UIManager.Instance.MoveLobbyPanelObj(false);
+            }
+            else if(nowDragDir == DragDir.right)
+            {
+                if (Mathf.Abs(vec_Dir) >= LobbyScrollViewThresHold)
+                    UIManager.Instance.MoveLobbyPanelObj(true);
+            }
+
+            nowDragDir = DragDir.none;
+            isExceptHorizontal = false;
+            ToggleHorizontal(true);
+            ToggleVertical(true);
+        }
+        // ==================================== //
+        #endregion
+    }
+
+    void ToggleHorizontal(bool flag)
+    {
+        for(int i=0;i<ShopHorizontalScrollView.Count;i++)
+            ShopHorizontalScrollView[i].enabled = flag;
+    }
+    void ToggleVertical(bool flag)
+    {
+        for (int i = 0; i < ShopVerticalScrollView.Count; i++)
+            ShopVerticalScrollView[i].enabled = flag;
+    }
+
+    public void CheckDragDirection()
+    {
+        //Debug.Log(nowDragDir);
+        switch (nowDragDir)
+        {
+            case DragDir.up:
+                //가로 끄고 세로로 
+                if (UIManager.Instance.nowPanelNum == 0)
+                {
+                    ToggleHorizontal(false);
+                    ToggleVertical(true);
+                }
+                break;
+
+            case DragDir.down:
+                //가로 끄고 세로로
+                if (UIManager.Instance.nowPanelNum == 0)
+                {
+                    ToggleHorizontal(false);
+                    ToggleVertical(true);
+                }
+                break;
+
+            case DragDir.left:
+                //세로 스크롤 끄고 가로로 
+                if (UIManager.Instance.nowPanelNum == 0)
+                {
+                    ToggleHorizontal(true);
+                    ToggleVertical(false);
+                }
+                break;
+
+            case DragDir.right:
+                //세로 스크롤 끄고 가로로 
+                if (UIManager.Instance.nowPanelNum == 0)
+                {
+                    ToggleHorizontal(true);
+                    ToggleVertical(false);
+                }
+                break;
+        }
+    }
+}
